@@ -1,6 +1,25 @@
 import discord
 from discord.ext import commands
 import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+# --- FIX PRO RENDER (Drží port otevřený, aby služba nepadala na timeout) ---
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Announcement Bot is online 24/7!")
+    def log_message(self, format, *args):
+        pass
+
+def run_web_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    server.serve_forever()
+
+threading.Thread(target=run_web_server, daemon=True).start()
+# -------------------------------------------------------------
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -35,7 +54,6 @@ class AnnouncementModal(discord.ui.Modal):
         content = self.content_input.value.strip()
         user_name = interaction.user.display_name
 
-        # Vytvoření čistého a přehledného embedu
         embed = discord.Embed(
             title=f"📢 {title}",
             description=content,
@@ -44,22 +62,18 @@ class AnnouncementModal(discord.ui.Modal):
         embed.set_footer(text=f"Oficiální oznámení • Zveřejnil: {user_name}")
         embed.timestamp = discord.utils.utcnow()
 
-        # Odeslání oznámení do kanálu i s interaktivním tlačítkem na přečtení
         await interaction.channel.send(embed=embed, view=ReadAnnouncementView())
-        
-        # Soukromé potvrzení autorovi
         await interaction.response.send_message("✅ Oznámení bylo úspěšně zveřejněno!", ephemeral=True)
 
 class ReadAnnouncementView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None)  # Trvalé tlačítko, nevyprší
+        super().__init__(timeout=None)
         self.read_users = set()
 
     @discord.ui.button(label="Přečteno (0)", style=discord.ButtonStyle.success, emoji="✅", custom_id="read_check_btn")
     async def read_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         user_id = interaction.user.id
         
-        # Pokud už uživatel klikl dříve, kliknutím se stav přepne zpět (zruší přečtení)
         if user_id in self.read_users:
             self.read_users.remove(user_id)
             await interaction.response.send_message("❌ Označení 'přečteno' bylo zrušeno.", ephemeral=True)
@@ -67,7 +81,6 @@ class ReadAnnouncementView(discord.ui.View):
             self.read_users.add(user_id)
             await interaction.response.send_message("✅ Zpráva byla označena jako přečtená!", ephemeral=True)
         
-        # Aktualizace čísla v textu tlačítka
         button.label = f"Přečteno ({len(self.read_users)})"
         await interaction.message.edit(view=self)
 
